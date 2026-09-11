@@ -221,6 +221,7 @@
        width: 240px;
        scrollbar-width: thin;
        scrollbar-color: var(--line) transparent;
+       z-index: 20;
    }
 
    aside::-webkit-scrollbar {
@@ -3724,6 +3725,21 @@
        font-size: 14px;
        color: var(--text-2);
        line-height: 1.5;
+   }
+
+   .faq-item {
+       padding: 16px 0;
+       border-top: 1px solid var(--line);
+   }
+
+   .faq-item:first-child {
+       padding-top: 0;
+       border-top: none;
+   }
+
+   .faq-item .backup-guide-toggle {
+       font-size: 15px;
+       font-weight: 600;
    }
 
    .note {

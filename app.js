@@ -178,7 +178,6 @@ function extendRecurringSeries() {
     const seriesMap = {};
     for (const bill of data.bills) {
         if (bill.frequency === "one-time") continue;
-        if (bill.endDate) continue;
         if (!seriesMap[bill.seriesId]) seriesMap[bill.seriesId] = [];
         seriesMap[bill.seriesId].push(bill);
     }
@@ -192,7 +191,9 @@ function extendRecurringSeries() {
         );
 
         const lastDate = parseLocalDate(last.dueDate);
-        if (lastDate >= endOfNextYear) continue;
+        const seriesEndDate = last.endDate ? parseLocalDate(last.endDate) : null;
+        const extendTo = seriesEndDate && seriesEndDate < endOfNextYear ? seriesEndDate : endOfNextYear;
+        if (lastDate >= extendTo) continue;
 
         // Calculează next occurrence de la lastDate
         const next = new Date(lastDate);
@@ -203,7 +204,7 @@ function extendRecurringSeries() {
             case "yearly": next.setFullYear(next.getFullYear() + last.interval); break;
         }
 
-        if (next > endOfNextYear) continue;
+        if (next > extendTo) continue;
 
         // Generează de la next în continuare
         const template = { ...last };
@@ -385,7 +386,7 @@ function saveData() {
         const currentSnapshot = cloneAppData();
 
         if (!lastSavedSnapshot) {
-            lastSavedSnapshot = structuredClone(currentSnapshot);
+            lastSavedSnapshot = currentSnapshot;
         } else if (!snapshotsEqual(lastSavedSnapshot, currentSnapshot)) {
             undoStack.push({
                 snapshot: structuredClone(lastSavedSnapshot)
@@ -396,7 +397,7 @@ function saveData() {
             }
 
             redoStack = [];
-            lastSavedSnapshot = structuredClone(currentSnapshot);
+            lastSavedSnapshot = currentSnapshot;
         }
     }
 
@@ -1337,6 +1338,7 @@ const sectionConfig = {
     backup: { main: "Backup", getLabel: null },
     quickstart: { main: "quick start", secondary: "guide", getLabel: null },
     contact: { main: "contact", secondary: "us", getLabel: null },
+    faq: { main: "FAQ", getLabel: null },
 };
 
 function buildListLabel() {
@@ -1414,7 +1416,7 @@ function showSection(section) {
     renderPageHeader(section);
 
     const config = sectionConfig[section];
-    document.getElementById("pageTitle").classList.remove("page-calendar", "page-list", "page-monthly", "page-yearly", "page-settings", "page-backup", "page-quickstart", "page-contact");
+    document.getElementById("pageTitle").classList.remove("page-calendar", "page-list", "page-monthly", "page-yearly", "page-settings", "page-backup", "page-quickstart", "page-contact", "page-faq");
     document.getElementById("pageTitle").classList.add(`page-${section}`);
 
     if (config && typeof config.main !== "undefined") {
@@ -1427,7 +1429,12 @@ function showSection(section) {
     updateSectionLabel(section);
 
     if (section === "list") {
+        renderBills();
         if (typeof openTransactionListInfoModal === "function") openTransactionListInfoModal();
+    }
+
+    if (section === "settings") {
+        renderSettings();
     }
 
     if (section === "calendar") {
@@ -1511,11 +1518,11 @@ function renderAll() {
     const activeSection = localStorage.getItem("activeSection") || "list";
     renderPageHeader(activeSection);
     renderFilterOptions();
-    renderBills();
-    renderCalendar();
-    renderMonthlyInsights();
-    renderYearlySummary();
-    renderSettings();
+    if (activeSection === "list") renderBills();
+    if (activeSection === "calendar") renderCalendar();
+    if (activeSection === "monthly") renderMonthlyInsights();
+    if (activeSection === "yearly") renderYearlySummary();
+    if (activeSection === "settings") renderSettings();
     updateCurrencyInputDisplay();
 }
 
@@ -1598,7 +1605,8 @@ function renderSettings() {
 
 const HIDEABLE_MENU_ITEMS = [
     { section: "quickstart", label: "Quick Start Guide" },
-    { section: "contact", label: "Contact" }
+    { section: "contact", label: "Contact" },
+    { section: "faq", label: "FAQ" }
 ];
 
 function renderMenuVisibilitySettings() {
@@ -1620,7 +1628,8 @@ function renderMenuVisibilitySettings() {
 function generateRecurringBills(bill) {
     const bills = [];
     const endOfNextYear = new Date(new Date().getFullYear() + 1, 11, 31);
-    const limitDate = bill.endDate ? parseLocalDate(bill.endDate) : endOfNextYear;
+    const billEndDate = bill.endDate ? parseLocalDate(bill.endDate) : null;
+    const limitDate = billEndDate && billEndDate < endOfNextYear ? billEndDate : endOfNextYear;
 
     let current = parseLocalDate(bill.dueDate);
     let count = 0;
@@ -1697,6 +1706,14 @@ function showActivationModal() {
 function toggleBackupGuide() {
   const body = document.getElementById('backupGuideBody');
   const chevron = document.getElementById('backupGuideChevron');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  chevron.classList.toggle('open', !isOpen);
+}
+
+function toggleFaqItem(btn) {
+  const body = btn.nextElementSibling;
+  const chevron = btn.querySelector('.backup-guide-chevron');
   const isOpen = body.style.display !== 'none';
   body.style.display = isOpen ? 'none' : 'block';
   chevron.classList.toggle('open', !isOpen);
@@ -2294,7 +2311,7 @@ function renderPageHeader(section) {
 
     if (!pageHeader || !summaryGrid) return;
 
-    const hidden = ["settings", "backup", "quickstart"];
+    const hidden = ["settings", "backup", "quickstart", "faq"];
     if (hidden.includes(section)) {
         pageHeader.style.display = "none";
         document.querySelector("main")?.classList.add("no-header");
@@ -2738,6 +2755,12 @@ function toggleCalDrawer(forceState) {
     });
 }
 
+function getWeekStartIndex() {
+    const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const idx = days.indexOf(data.settings.weekStart);
+    return idx === -1 ? 0 : idx;
+}
+
 function renderCalendar() {
     const year = currentCalendarDate.getFullYear();
     const month = currentCalendarDate.getMonth();
@@ -2811,16 +2834,16 @@ function renderCalendar() {
         }, 0);
     }
 
-    const weekStartMonday = data.settings.weekStart === "monday";
+    const weekStartIdx = getWeekStartIndex();
     const isMobileView = window.innerWidth <= 550;
-    const dayNames = weekStartMonday
-        ? (isMobileView ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] : ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])
-        : (isMobileView ? ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] : ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]);
+    const rotateWeek = arr => arr.slice(weekStartIdx).concat(arr.slice(0, weekStartIdx));
+    const dayNames = isMobileView
+        ? rotateWeek(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])
+        : rotateWeek(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]);
 
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
-    let startOffset = firstDay.getDay();
-    if (weekStartMonday) startOffset = (startOffset + 6) % 7;
+    let startOffset = (firstDay.getDay() - weekStartIdx + 7) % 7;
 
     const statusFilter = document.getElementById("calFilterStatus")?.value ?? "";
     const priorityFilter = document.getElementById("calFilterPriority")?.value ?? "";
@@ -2829,7 +2852,7 @@ function renderCalendar() {
     const yearFilter = document.getElementById("calFilterYear")?.value ?? "";
 
     const cells = [];
-    const weekendColIndexes = weekStartMonday ? [5, 6] : [0, 6];
+    const weekendColIndexes = [(0 - weekStartIdx + 7) % 7, (6 - weekStartIdx + 7) % 7];
     dayNames.forEach((name, i) => {
         const isWknd = weekendColIndexes.includes(i);
         cells.push(`<div class="day-name${isWknd ? ' weekend' : ''}">${name}</div>`);
@@ -2855,7 +2878,7 @@ function renderCalendar() {
     for (let day = 1; day <= lastDay.getDate(); day++) {
         const dateString = toLocalDateInputValue(new Date(year, month, day));
         const dayOfWeek = new Date(year, month, day).getDay();
-        const isWeekend = weekendColIndexes.includes(weekStartMonday ? (dayOfWeek + 6) % 7 : dayOfWeek);
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         const isToday = dateString === todayString;
 
         const bills = applyBillFilters(data.bills, { statusFilter, priorityFilter, categoryFilter, monthFilter, yearFilter, dateString });
@@ -2969,13 +2992,12 @@ function renderMiniCalendar(containerId = "miniCalendar") {
     const month = currentCalendarDate.getMonth();
     const today = new Date();
 
-    const weekStartMonday = data.settings.weekStart === "monday";
+    const weekStartIdx = getWeekStartIndex();
 
-    const dayNames = weekStartMonday
-        ? ["M", "T", "W", "T", "F", "S", "S"]
-        : ["S", "M", "T", "W", "T", "F", "S"];
+    const fullLetters = ["S", "M", "T", "W", "T", "F", "S"];
+    const dayNames = fullLetters.slice(weekStartIdx).concat(fullLetters.slice(0, weekStartIdx));
 
-    const weekendIndexes = weekStartMonday ? [5, 6] : [0, 6];
+    const weekendIndexes = [(0 - weekStartIdx + 7) % 7, (6 - weekStartIdx + 7) % 7];
 
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -2992,8 +3014,7 @@ function renderMiniCalendar(containerId = "miniCalendar") {
     ).join("")}
 `;
 
-    let offset = firstDay.getDay();
-    if (weekStartMonday) offset = (offset + 6) % 7;
+    let offset = (firstDay.getDay() - weekStartIdx + 7) % 7;
 
     for (let i = 0; i < offset; i++) {
         html += `<div></div>`;
@@ -4745,7 +4766,7 @@ async function autoSaveToBackup() {
         const fileName = "bill-tracker-v1-backup.json";
         const activated = localStorage.getItem("billTrackerActivated");
         const exportData = activated ? { ...data, _activated: true } : data;
-        const json = JSON.stringify(exportData, null, 2);
+        const json = JSON.stringify(exportData);
         const blob = new Blob([json], { type: "application/json" });
 
         const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
